@@ -7,6 +7,7 @@ This **Electron** app, built with **Vue and TypeScript** and stylized with **Tai
 - If there are no significant interruptions for a long period of time, your internet connection is stable.
 - If there are some significant interruptions and `ping` command received only 70-80% of internet signals, your internet connection needs some attention.
 - If there are no signals received, connection is considered to be lost.
+- At the final screen, the user will see the stability level (percentage of received signals) and average delay of the network.
 
 To change how the app runs, after you clone it, go to `config/config.ts`. There, you will find the following options to customize:
 
