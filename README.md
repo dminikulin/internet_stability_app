@@ -1,3 +1,5 @@
+#Internet stability app
+
 This **Electron** app, built with **Vue and TypeScript** and stylized with **Tailwind**, checks the internet stability on a currently connected network by simulating a `ping` command. The idea is to make this terminal command more user-friendly and accessible for simple user.
 
 **Principle of work:**
