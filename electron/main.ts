@@ -1,22 +1,11 @@
 import { app, BrowserWindow, ipcMain } from "electron";
-// import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { Socket } from "node:net";
 import { PING_CONFIG } from "../config/config";
+import { exec } from "node:child_process";
+import { platform } from "node:os";
 
-// const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// The built directory structure
-//
-// ├─┬─┬ dist
-// │ │ └── index.html
-// │ │
-// │ ├─┬ dist-electron
-// │ │ ├── main.js
-// │ │ └── preload.mjs
-// │
 process.env.APP_ROOT = path.join(__dirname, "..");
 
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
@@ -29,124 +18,143 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   : RENDERER_DIST;
 
 let win: BrowserWindow | null;
-
-// --- 📡 YOUR PING ENGINE CODES ---
 let isRunning = false;
-const stats = {
-  totalSent: 0,
-  packetsReceived: 0,
-  packetsDropped: 0,
-  consecutiveFailures: 0,
-  currentLatency: null as number | null,
-  avgLatency: 0,
-  status: "running", // 'running', 'stable', 'degraded', or 'failed'
+
+// Cross-platform command selector
+const getTracerouteCommand = (host: string) => {
+  const isWindows = platform() === "win32";
+  const hops = PING_CONFIG.MAX_HOPS;
+  const timeout = PING_CONFIG.TIMEOUT_MS;
+
+  // Windows: -d (skip DNS lookup), -h (max hops), -w (timeout ms)
+  // Linux/macOS: -n (skip DNS lookup), -m (max hops), -w (timeout seconds)
+  return isWindows
+    ? `tracert -d -h ${hops} -w ${timeout} ${host}`
+    : `traceroute -n -m ${hops} -w ${Math.ceil(timeout / 1000)} ${host}`;
 };
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// Parse terminal output string
+const parseTracerouteOutput = (rawOutput: string) => {
+  const lines = rawOutput.split("\n").filter((line) => line.trim().length > 0);
 
-function measurePing(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const socket = new Socket();
-    const startTime = process.hrtime();
-    socket.setTimeout(PING_CONFIG.PING_TIMEOUT);
+  const hopRegex = /^\s*(\d+)/;
+  const hops: { hopNumber: number; timedOut: boolean; latency: number }[] = [];
 
-    socket.connect(PING_CONFIG.TARGET_PORT, PING_CONFIG.TARGET_HOST, () => {
-      const diff = process.hrtime(startTime);
-      const latencyMs = Math.round(diff[0] * 1000 + diff[1] / 1000000);
-      socket.destroy();
-      resolve(latencyMs);
-    });
+  lines.forEach((line) => {
+    const match = line.match(hopRegex);
+    if (match) {
+      const hopNumber = parseInt(match[1], 10);
+      const isTimedOut =
+        line.includes("* * *") || (!line.includes("ms") && line.includes("*"));
 
-    socket.on("timeout", () => {
-      socket.destroy();
-      reject(new Error("Timeout"));
-    });
-    socket.on("error", (err) => {
-      socket.destroy();
-      reject(err);
-    });
+      const msMatches = [...line.matchAll(/(\d+(?:\.\d+)?)\s*ms/gi)].map((m) =>
+        parseFloat(m[1]),
+      );
+
+      const avgHopLatency =
+        msMatches.length > 0
+          ? Math.round(
+              msMatches.reduce((acc, curr) => acc + curr, 0) / msMatches.length,
+            )
+          : 0;
+
+      hops.push({
+        hopNumber,
+        timedOut: isTimedOut,
+        latency: avgHopLatency,
+      });
+    }
   });
-}
 
-async function startPingEngine() {
-  isRunning = true;
-  let totalLatency = 0;
+  const validLatencies = hops.filter((h) => !h.timedOut && h.latency > 0);
+  const avgLatency =
+    validLatencies.length > 0
+      ? Math.round(
+          validLatencies.reduce((sum, h) => sum + h.latency, 0) /
+            validLatencies.length,
+        )
+      : 0;
 
-  while (
-    isRunning &&
-    stats.packetsReceived < PING_CONFIG.SUCCESS_BOUNDARY &&
-    stats.consecutiveFailures < PING_CONFIG.CONSECUTIVE_FAILURES
-  ) {
-    stats.totalSent++;
-    try {
-      const latency = await measurePing();
-      stats.currentLatency = latency;
-      stats.packetsReceived++;
-      stats.consecutiveFailures = 0;
+  let status: "stable" | "degraded" | "failed" = "stable";
+  let failureOrigin: "local" | "isp" | "none" = "none";
+  let message = "Your internet connection is stable!";
 
-      totalLatency += latency;
-      stats.avgLatency = totalLatency / stats.packetsReceived;
-    } catch {
-      stats.currentLatency = null;
-      stats.packetsDropped++;
-      stats.consecutiveFailures++;
-    }
-
-    // Send data updates to the Vue layout via the built-in channel
-    if (win) {
-      win.webContents.send("ping-update", { ...stats });
-    }
-
-    if (
-      stats.packetsReceived < PING_CONFIG.SUCCESS_BOUNDARY &&
-      stats.consecutiveFailures < PING_CONFIG.CONSECUTIVE_FAILURES
-    ) {
-      await delay(PING_CONFIG.PING_DELAY);
-    }
-  }
-
-  isRunning = false;
-
-  // Calculate success rate percentage
-  const successRate =
-    stats.totalSent > 0 ? (stats.packetsReceived / stats.totalSent) * 100 : 0;
-
-  // Evaluate 3-tier health status
-  if (stats.packetsReceived === 0 || stats.consecutiveFailures >= 15) {
-    stats.status = "failed"; // Red: No connection / total dropout
-  } else if (successRate < 80) {
-    stats.status = "degraded"; // Yellow: Intermittent packet loss (<80%)
+  if (hops.length === 0 || hops[0]?.timedOut) {
+    status = "failed";
+    failureOrigin = "local";
+    message =
+      "Cannot communicate with your local router. Check your Wi-Fi or Ethernet connection.";
   } else {
-    stats.status = "stable"; // Green: Strong connection (>=80%)
+    // Check if the signal dropped permanently at Hop 2 or 3
+    const firstDrop = hops.find((_, index) =>
+      hops.slice(index).every((remaining) => remaining.timedOut),
+    );
+
+    if (firstDrop) {
+      status = "failed";
+      failureOrigin = "isp";
+      message = `Signal lost at Hop ${firstDrop.hopNumber}. The issue appears to be with your Internet Service Provider.`;
+    } else if (hops.some((h) => h.timedOut) || avgLatency > 150) {
+      status = "degraded";
+      message =
+        "High latency or minor packet loss detected on your network route.";
+    }
   }
 
-  if (win) {
-    win.webContents.send("ping-update", { ...stats });
-  }
-}
+  return {
+    status,
+    failureOrigin,
+    message,
+    totalHops: hops.length,
+    avgLatency,
+    rawOutput,
+  };
+};
 
-// 📩 IPC Event Listener (Triggered when user clicks START in App.vue)
-ipcMain.on("start-ping-test", () => {
-  if (!isRunning) {
-    // Reset state counters before running a new test
-    stats.totalSent = 0;
-    stats.packetsReceived = 0;
-    stats.packetsDropped = 0;
-    stats.consecutiveFailures = 0;
-    stats.currentLatency = null;
-    stats.status = "running";
+// 🚀 Core Diagnostic Execution
+const runTracerouteDiagnostic = () => {
+  if (isRunning) return;
+  isRunning = true;
 
-    startPingEngine();
-  }
+  const command = getTracerouteCommand(PING_CONFIG.TARGET_HOST);
+
+  exec(command, { maxBuffer: 1024 * 500 }, (error, stdout, stderr) => {
+    isRunning = false;
+
+    if (error && !stdout) {
+      if (win) {
+        win.webContents.send("ping-update", {
+          status: "failed",
+          failureOrigin: "local",
+          message: "Failed to run diagnostic. Check your network adapter.",
+          totalHops: 0,
+          avgLatency: 0,
+          rawOutput: stderr || error.message,
+        });
+      }
+      return;
+    }
+
+    const results = parseTracerouteOutput(stdout);
+
+    if (win) {
+      win.webContents.send("ping-update", results);
+    }
+  });
+};
+
+// 📩 IPC Handlers
+ipcMain.on("start-test", () => {
+  runTracerouteDiagnostic();
 });
 
 ipcMain.on("close-app", () => {
   app.quit();
 });
 
-function createWindow() {
+const createWindow = () => {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    // icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     width: 600,
     height: 400,
     webPreferences: {
@@ -160,7 +168,7 @@ function createWindow() {
     // win.loadFile('dist/index.html')
     win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
-}
+};
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

@@ -2,20 +2,23 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { PING_CONFIG } from "../config/config.ts";
 import "./index.css";
-import { CircleAlert, CircleCheckBig, CircleMinus } from "@lucide/vue";
-import LoaderBar from "./Loaders/LoaderBar.vue";
-// import LoaderProgress from "./Loaders/LoaderProgress.vue";
-// import LoaderPolygon from "./Loaders/LoaderPolygon.vue";
+import {
+  CircleCheckBig,
+  RouteOff,
+  ServerCrash,
+  CircleAlert,
+} from "@lucide/vue";
+import Loader from "./Loaders/Loader.vue";
 
 type AppState = "idle" | "testing" | "finished";
 
 interface NetworkStats {
   status: "stable" | "degraded" | "failed";
-  totalSent: number;
-  packetsReceived: number;
-  packetsDropped: number;
-  consecutiveFailures: number;
-  avgLatency?: number; // Optional if latency wasn't measured on total fail
+  failureOrigin?: "local" | "isp" | "none";
+  message?: string;
+  totalHops: number;
+  avgLatency: number;
+  rawOutput?: string;
 }
 
 const appState = ref<AppState>("idle");
@@ -32,7 +35,7 @@ const updateData = (_event: unknown, data: NetworkStats) => {
 const startDiagnostic = () => {
   appState.value = "testing";
   // Trigger the Node loop in electron/main.ts
-  window.ipcRenderer.send("start-ping-test");
+  window.ipcRenderer.send("start-test");
 };
 
 const resetTest = () => {
@@ -52,101 +55,110 @@ onUnmounted(() => {
   window.ipcRenderer.off("ping-update", updateData);
 });
 
-// 📊 Computed values for stats rendering
-const successRate = computed(() => {
-  if (!networkStats.value || !networkStats.value.totalSent) return "0%";
-  const rate =
-    (networkStats.value.packetsReceived / networkStats.value.totalSent) * 100;
-  return `${rate.toFixed(0)}%`;
-});
-
-const avgLatency = computed(() => {
-  if (!networkStats.value?.avgLatency) return "N/A";
-  return `${Math.round(networkStats.value.avgLatency)}ms`;
+const avgLatencyDisplay = computed(() => {
+  if (!networkStats.value || networkStats.value.avgLatency === 0) return "N/A";
+  return `${networkStats.value.avgLatency}ms`;
 });
 </script>
 
 <template>
   <main
-    class="container min-h-screen w-full p-6 bg-stone-100 dark:bg-stone-900 text-stone-900 dark:text-stone-100"
+    class="min-h-screen w-full flex items-center justify-center p-6 bg-stone-100 dark:bg-stone-900 text-stone-900 dark:text-stone-100 select-none"
   >
+    <!-- IDLE STATE -->
     <div
       v-if="appState === 'idle'"
       id="start"
-      class="flex flex-col gap-3 justify-center items-center text-center min-h-[75vh]"
+      class="w-full max-w-sm flex flex-col items-center text-center gap-6"
     >
-      <h1 class="text-3xl font-semibold">Check your internet stability!</h1>
-      <p>
-        The check will run on
-        <span class="font-bold">{{ PING_CONFIG.TARGET_HOST }}.</span>
-        <br />
-        It will finish if no critical interruptions are found or if the signal
-        is lost for a considerate amount of time.
-      </p>
-      <button
-        @click="startDiagnostic"
-        class="w-60 rounded-full px-5 py-2 box-border border-2 border-teal-900 bg-teal-700 hover:bg-teal-500 duration-300 ease-in-out"
-      >
-        START
-      </button>
+      <div class="space-y-3">
+        <h1 class="text-2xl font-bold tracking-tight">
+          Check your internet stability!
+        </h1>
+        <p class="text-sm">
+          The check will run on
+          <span class="inline-block font-mono font-semibold"
+            >{{ PING_CONFIG.TARGET_HOST }}.</span
+          >
+        </p>
+        <button
+          @click="startDiagnostic"
+          class="w-48 py-2 rounded-full font-medium tracking-wide text-white bg-teal-600 hover:bg-teal-500 active:scale-95 shadow-sm transition-all duration-200 cursor-pointer"
+        >
+          Run Test
+        </button>
+      </div>
     </div>
+
+    <!-- TESTING STATE -->
     <div
       v-if="appState === 'testing'"
       id="loading"
-      class="flex flex-col py-4 items-center min-h-[75vh]"
+      class="w-full max-w-sm h-64 flex flex-col items-center justify-between text-center"
     >
-      <p class="text-2xl text-center font-semibold">Testing connection...</p>
-      <!-- <LoaderPolygon class="my-auto"></LoaderPolygon> -->
-      <!-- <LoaderProgress class="my-auto"></LoaderProgress> -->
-      <LoaderBar class="my-auto"></LoaderBar>
+      <p class="text-lg font-medium text-stone-600 dark:text-stone-300">
+        Testing connection...
+      </p>
+      <Loader class="my-auto"></Loader>
     </div>
+
+    <!-- FINISHED STATE -->
     <div
       v-if="appState === 'finished'"
       id="results"
-      class="flex flex-col items-center gap-4 min-h-[75vh]"
+      class="w-full max-w-sm flex flex-col items-center text-center gap-6"
     >
       <CircleCheckBig
         v-if="networkStats?.status === 'stable'"
         :size="48"
-        color="#00c800"
+        class="text-teal-600 dark:text-teal-400"
       ></CircleCheckBig>
       <CircleAlert
         v-else-if="networkStats?.status === 'degraded'"
         :size="48"
-        color="#fac800"
+        class="text-amber-500 dark:text-amber-400"
       ></CircleAlert>
-      <CircleMinus v-else :size="48" color="#fa0000"></CircleMinus>
+      <RouteOff
+        v-else-if="networkStats?.failureOrigin === 'local'"
+        :size="48"
+        class="text-red-600 dark:text-red-500"
+      ></RouteOff>
+      <ServerCrash
+        v-else
+        :size="48"
+        class="text-red-600 dark:text-red-500"
+      ></ServerCrash>
+
+      <!-- DIAGNOSTIC MESSAGE -->
       <p
-        v-if="networkStats?.status === 'stable'"
-        class="text-2xl text-center font-bold"
+        class="text-base font-medium leading-snug max-w-xs text-stone-800 dark:text-stone-200"
       >
-        Your internet connection is stable!
+        {{ networkStats?.message || "Diagnostic completed." }}
       </p>
-      <p
-        v-else-if="networkStats?.status === 'degraded'"
-        class="text-2xl text-center font-bold"
+
+      <!-- METRIC CARD -->
+      <div
+        class="w-full py-3 px-4 rounded-xl bg-stone-200/60 dark:bg-stone-800/60 flex items-center justify-between text-sm"
       >
-        Your internet connection might not be stable.
-      </p>
-      <p v-else class="text-2xl text-center font-bold">Connection lost!</p>
-      <div class="my-auto">
-        <p class="text-lg">
-          Success rate: <span class="font-semibold">{{ successRate }}</span>
-        </p>
-        <p class="text-lg">
-          Average delay: <span class="font-semibold">{{ avgLatency }}</span>
-        </p>
+        <span class="text-stone-500 dark:text-stone-400">Average Delay</span>
+        <span
+          class="font-mono font-semibold text-stone-900 dark:text-stone-100"
+        >
+          {{ avgLatencyDisplay }}
+        </span>
       </div>
-      <div>
+
+      <!-- ACTION BUTTONS -->
+      <div class="flex items-center gap-3 w-full">
         <button
           @click="resetTest"
-          class="rounded-full mx-10 px-5 py-2 box-border border-2 border-teal-900 bg-teal-700 hover:bg-teal-500 duration-300 ease-in-out"
+          class="flex-1 py-2.5 rounded-full font-medium text-sm text-white bg-teal-600 hover:bg-teal-500 active:scale-95 shadow-sm transition-all duration-200 cursor-pointer"
         >
-          Start again
+          Retest
         </button>
         <button
           @click="closeApp"
-          class="rounded-full mx-10 px-5 py-2 box-border border-2 border-rose-900 bg-rose-700 hover:bg-rose-500 duration-300 ease-in-out"
+          class="flex-1 py-2.5 rounded-full font-medium text-sm text-stone-700 dark:text-stone-300 bg-stone-200 dark:bg-stone-800 hover:bg-stone-300 dark:hover:bg-stone-700 active:scale-95 transition-all duration-200 cursor-pointer"
         >
           Exit
         </button>

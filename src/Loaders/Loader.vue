@@ -3,7 +3,7 @@
 </template>
 
 <style scoped lang="css">
-/** Animation "The Polygons #18" from https://css-loaders.com/ */
+/** Animation "The Bars #18" from https://css-loaders.com/ */
 
 .loader {
   width: 45px;
