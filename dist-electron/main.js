@@ -17,6 +17,21 @@ var PING_CONFIG = {
 //#region electron/main.ts
 var __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, "..");
+var ISP_FAILURE_MOCK = {
+	ispFailureWindows: `
+  Tracing route to 1.1.1.1 over a maximum of 3 hops
+
+    1    <1 ms    <1 ms    <1 ms  192.168.1.1
+    2     *        *        *     Request timed out.
+    3     *        *        *     Request timed out.
+  `,
+	ispFailureUnix: `
+    traceroute to 1.1.1.1 (1.1.1.1), 3 hops max, 52 byte packets
+     1  192.168.1.1  1.120 ms  0.980 ms  0.940 ms
+     2  * * *
+     3  * * *
+  `
+};
 var VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 var MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 var RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
@@ -92,7 +107,7 @@ var runTracerouteDiagnostic = () => {
 			});
 			return;
 		}
-		const results = parseTracerouteOutput(stdout);
+		const results = parseTracerouteOutput(ISP_FAILURE_MOCK.ispFailureUnix);
 		if (win) win.webContents.send("ping-update", results);
 	});
 };

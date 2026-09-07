@@ -8,6 +8,23 @@ import { platform } from "node:os";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, "..");
 
+// Mock object designed to simulate the ISP error, FOR TESTING PURPOSES.
+// const ISP_FAILURE_MOCK = {
+//   ispFailureWindows: `
+//   Tracing route to 1.1.1.1 over a maximum of 3 hops
+
+//     1    <1 ms    <1 ms    <1 ms  192.168.1.1
+//     2     *        *        *     Request timed out.
+//     3     *        *        *     Request timed out.
+//   `,
+//   ispFailureUnix: `
+//     traceroute to 1.1.1.1 (1.1.1.1), 3 hops max, 52 byte packets
+//      1  192.168.1.1  1.120 ms  0.980 ms  0.940 ms
+//      2  * * *
+//      3  * * *
+//   `,
+// };
+
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
 export const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 export const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
@@ -135,6 +152,10 @@ const runTracerouteDiagnostic = () => {
       return;
     }
 
+    // Use for testing ISP failure, use different property depending on your system
+    // const results = parseTracerouteOutput(ISP_FAILURE_MOCK.ispFailureUnix);
+    
+    // Use in production
     const results = parseTracerouteOutput(stdout);
 
     if (win) {
