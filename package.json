@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build && electron-builder",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "main": "dist-electron/main.js",
   "dependencies": {
@@ -19,10 +21,12 @@
     "@vitejs/plugin-vue": "^6.0.7",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
+    "prettier": "^3.9.6",
     "typescript": "^7.0.2",
     "vite": "^8.1.4",
     "vite-plugin-electron": "^1.1.0",
     "vite-plugin-electron-renderer": "^1.0.0",
+    "vitest": "^5.0.0",
     "vue-tsc": "^3.3.7"
   }
 }
