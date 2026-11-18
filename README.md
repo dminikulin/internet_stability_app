@@ -15,7 +15,7 @@ The app analyzes the route your signals take across the first three critical sta
 **What do the results mean?**
 
 1. **Failure at Hop 1 (Router)**: The issue is likely with your router. Check your Wi-Fi connection, Ethernet cables and restart the router.
-2. **Failures at Hops 2-3 (Hub or Gateway)**: Your internet equipment is working, but your provider's network is experiencing outages or loss of signal. This is an external issue for your provider to resolve.
+2. **Failures at Hops 2-3 (Hub or Gateway)**: Your internet equipment is working, but your provider's network is experiencing outages or loss of signal. This is an external issue for your provider to solve.
 3. **All Hops pass**: Your local connection and provider link are healthy.
 
 To change how the app runs, after you clone it, go to `config/config.ts`. There, you will find the following options to customize:
@@ -24,7 +24,12 @@ To change how the app runs, after you clone it, go to `config/config.ts`. There,
 - `MAX_HOPS` - Limit to first 3 crucial hops (Router, Hub, ISP Edge).
 - `TIMEOUT_TS` - Timeout per probe in ms to prevent app hanging.
 
+**Export logs:**
+
+If the app identifies the ISP failure, you'll have an option to save the log into a `.txt` file (anywhere on your machine!). This can be useful for your internet provided for further diagnosis of that failure.
+
 **Roadmap:**
 
-1. I will add the ability to save the command log in case of failures at Hub or ISP Edge. This can be useful for your internet provider to troubleshoot.
-2. In the light of recent and frequent CloudFare outages, I will add the ability to check whether a specific site is down. The command should send 1-2 more signals and based on their results, the app will decide, whether the site can be reached. You'll be able to enter the website URL manually.
+~~ - I will add the ability to save the command log in case of failures at Hub or ISP Edge. This can be useful for your internet provider to troubleshoot. ~~
+
+- In the light of recent and frequent CloudFare outages, I will add the ability to check whether a specific site is down. The command should send 1-2 more signals and based on their results, the app will decide, whether the site can be reached. You'll be able to enter the website URL manually.

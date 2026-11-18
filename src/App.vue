@@ -1,62 +1,68 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { PING_CONFIG } from "../config/config.ts";
-import "./index.css";
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { PING_CONFIG } from '../config/config.ts';
+import './index.css';
 import {
   CircleCheckBig,
   RouteOff,
   ServerCrash,
   CircleAlert,
-} from "@lucide/vue";
-import Loader from "./Loaders/Loader.vue";
+} from '@lucide/vue';
+import Loader from './Loaders/Loader.vue';
 
-type AppState = "idle" | "testing" | "finished";
+type AppState = 'idle' | 'testing' | 'finished';
 
 interface NetworkStats {
-  status: "stable" | "degraded" | "failed";
-  failureOrigin?: "local" | "isp" | "none";
+  status: 'stable' | 'degraded' | 'failed';
+  failureOrigin?: 'local' | 'isp' | 'none';
   message?: string;
   totalHops: number;
   avgLatency: number;
   rawOutput?: string;
 }
 
-const appState = ref<AppState>("idle");
+const appState = ref<AppState>('idle');
 const networkStats = ref<NetworkStats | null>(null);
 
 const updateData = (_event: unknown, data: NetworkStats) => {
   networkStats.value = data;
 
-  if (["stable", "degraded", "failed"].includes(data.status)) {
-    appState.value = "finished";
+  if (['stable', 'degraded', 'failed'].includes(data.status)) {
+    appState.value = 'finished';
   }
 };
 
 const startDiagnostic = () => {
-  appState.value = "testing";
+  appState.value = 'testing';
   // Trigger the Node loop in electron/main.ts
-  window.ipcRenderer.send("start-test");
+  window.ipcRenderer.send('start-test');
 };
 
 const resetTest = () => {
   networkStats.value = null;
-  appState.value = "idle";
+  appState.value = 'idle';
 };
 
 const closeApp = () => {
-  window.ipcRenderer.send("close-app");
+  window.ipcRenderer.send('close-app');
+};
+
+const exportLogs = async () => {
+  if (!networkStats.value) return;
+
+  await window.ipcRenderer.invoke('export-logs', networkStats.value);
 };
 
 onMounted(() => {
-  window.ipcRenderer.on("ping-update", updateData);
+  window.ipcRenderer.on('ping-update', updateData);
 });
 
 onUnmounted(() => {
-  window.ipcRenderer.off("ping-update", updateData);
+  window.ipcRenderer.off('ping-update', updateData);
 });
 
 const avgLatencyDisplay = computed(() => {
-  if (!networkStats.value || networkStats.value.avgLatency === 0) return "N/A";
+  if (!networkStats.value || networkStats.value.avgLatency === 0) return 'N/A';
   return `${networkStats.value.avgLatency}ms`;
 });
 </script>
@@ -133,7 +139,7 @@ const avgLatencyDisplay = computed(() => {
       <p
         class="text-base font-medium leading-snug max-w-xs text-stone-800 dark:text-stone-200"
       >
-        {{ networkStats?.message || "Diagnostic completed." }}
+        {{ networkStats?.message || 'Diagnostic completed.' }}
       </p>
 
       <!-- METRIC CARD -->
@@ -155,6 +161,13 @@ const avgLatencyDisplay = computed(() => {
           class="flex-1 py-2.5 rounded-full font-medium text-sm text-white bg-teal-600 hover:bg-teal-500 active:scale-95 shadow-sm transition-all duration-200 cursor-pointer"
         >
           Retest
+        </button>
+        <button
+          v-if="networkStats?.failureOrigin === 'isp'"
+          @click="exportLogs"
+          class="flex-1 py-2.5 rounded-full font-medium text-sm text-white bg-amber-600 hover:bg-teal-500 active:scale-95 shadow-sm transition-all duration-200 cursor-pointer"
+        >
+          Export logs
         </button>
         <button
           @click="closeApp"

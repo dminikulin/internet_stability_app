@@ -1,10 +1,15 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PING_CONFIG } from '../config/config';
 import { exec } from 'node:child_process';
 import { platform } from 'node:os';
 import { parseTracerouteOutput } from './utils/parser';
+import {
+  exportLogs,
+  formatTracerouteLog,
+} from './utils/log_exporter';
+import { TracerouteDiagnosticLog } from './types/TracerouteDiagnosticLog';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, '..');
@@ -73,6 +78,35 @@ ipcMain.on('start-test', () => {
 
 ipcMain.on('close-app', () => {
   app.quit();
+});
+
+ipcMain.handle('export-logs', async (_event, diagnostic: TracerouteDiagnosticLog) => {
+  if (diagnostic.failureOrigin !== 'isp') {
+    return { canceled: true, error: 'Logs are available only for ISP failures.' };
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const result = await dialog.showSaveDialog({
+    title: 'Export traceroute logs',
+    defaultPath: `traceroute-log-${timestamp}.txt`,
+    filters: [
+      { name: 'Text logs', extensions: ['txt'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { canceled: true };
+  }
+
+  try {
+    const content = formatTracerouteLog(diagnostic, PING_CONFIG.TARGET_HOST);
+    const filePath = await exportLogs(content, result.filePath);
+    return { canceled: false, filePath };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not save the log file.';
+    return { canceled: false, error: message };
+  }
 });
 
 const createWindow = () => {

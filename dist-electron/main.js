@@ -1,168 +1,112 @@
-import { BrowserWindow, app, ipcMain } from "electron";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { exec } from "node:child_process";
-import { platform } from "node:os";
+import { BrowserWindow as e, app as t, dialog as n, ipcMain as r } from "electron";
+import { fileURLToPath as i } from "node:url";
+import a from "node:path";
+import { exec as o } from "node:child_process";
+import { platform as s } from "node:os";
+import { writeFile as c } from "node:fs/promises";
 //#region config/config.ts
-var PING_CONFIG = {
-  /** Server used to test the connection */
-  TARGET_HOST: "1.1.1.1",
-  /** Limit to first 3 crucial hops (Router, CMTS/Hub, ISP Edge).
-   * If it's necessary to test troubles like CloudFare outages, this number can be increased */
-  MAX_HOPS: 3,
-  /** Timeout per probe in ms to prevent app hanging */
-  TIMEOUT_MS: 1e3,
+var l = {
+	TARGET_HOST: "1.1.1.1",
+	MAX_HOPS: 3,
+	TIMEOUT_MS: 1e3
+}, u = (e) => {
+	let t = e.split("\n").filter((e) => e.trim().length > 0), n = /^\s*(\d+)/, r = [];
+	t.forEach((e) => {
+		let t = e.match(n);
+		if (t) {
+			let n = parseInt(t[1], 10), i = e.includes("* * *") || !e.includes("ms") && e.includes("*"), a = [...e.matchAll(/(\d+(?:\.\d+)?)\s*ms/gi)].map((e) => parseFloat(e[1])), o = a.length > 0 ? Math.round(a.reduce((e, t) => e + t, 0) / a.length) : 0;
+			r.push({
+				hopNumber: n,
+				timedOut: i,
+				latency: o
+			});
+		}
+	});
+	let i = r.filter((e) => !e.timedOut && e.latency > 0), a = i.length > 0 ? Math.round(i.reduce((e, t) => e + t.latency, 0) / i.length) : 0, o = "stable", s = "none", c = "Your internet connection is stable!";
+	if (r.length === 0 || r[0]?.timedOut) o = "failed", s = "local", c = "Cannot communicate with your local router. Check your Wi-Fi or Ethernet connection.";
+	else {
+		let e = r.find((e, t) => r.slice(t).every((e) => e.timedOut));
+		e ? (o = "failed", s = "isp", c = `Signal lost at Hop ${e.hopNumber}. The issue appears to be with your Internet Service Provider.`) : (r.some((e) => e.timedOut) || a > 150) && (o = "degraded", c = "High latency or minor packet loss detected on your network route.");
+	}
+	return {
+		status: o,
+		failureOrigin: s,
+		message: c,
+		totalHops: r.length,
+		avgLatency: a,
+		rawOutput: e
+	};
+}, d = (e, t) => {
+	let n = ["Internet Stability App - Traceroute Log", `Exported: ${(/* @__PURE__ */ new Date()).toISOString()}`];
+	return t && n.push(`Target: ${t}`), n.push(`Status: ${e.status}`, `Failure origin: ${e.failureOrigin ?? "none"}`, `Message: ${e.message ?? "Diagnostic completed."}`, `Hops checked: ${e.totalHops}`, `Average latency: ${e.avgLatency > 0 ? `${e.avgLatency} ms` : "N/A"}`, "", "Raw traceroute output:", e.rawOutput?.trim() || "No raw traceroute output was captured."), `${n.join("\n")}\n`;
+}, f = async (e, t) => (await c(t, e, "utf8"), t), p = a.dirname(i(import.meta.url));
+process.env.APP_ROOT = a.join(p, "..");
+var m = process.env.VITE_DEV_SERVER_URL, h = a.join(process.env.APP_ROOT, "dist-electron"), g = a.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = m ? a.join(process.env.APP_ROOT, "public") : g;
+var _, v = !1, y = (e) => {
+	let t = s() === "win32", n = l.MAX_HOPS, r = l.TIMEOUT_MS;
+	return t ? `tracert -d -h ${n} -w ${r} ${e}` : `traceroute -n -m ${n} -w ${Math.ceil(r / 1e3)} ${e}`;
+}, b = () => {
+	v || (v = !0, o(y(l.TARGET_HOST), { maxBuffer: 1024 * 500 }, (e, t, n) => {
+		if (v = !1, e && !t) {
+			_ && _.webContents.send("ping-update", {
+				status: "failed",
+				failureOrigin: "local",
+				message: "Failed to run diagnostic. Check your network adapter.",
+				totalHops: 0,
+				avgLatency: 0,
+				rawOutput: n || e.message
+			});
+			return;
+		}
+		let r = u(t);
+		_ && _.webContents.send("ping-update", r);
+	}));
 };
+r.on("start-test", () => {
+	b();
+}), r.on("close-app", () => {
+	t.quit();
+}), r.handle("export-logs", async (e, t) => {
+	if (t.failureOrigin !== "isp") return {
+		canceled: !0,
+		error: "Logs are available only for ISP failures."
+	};
+	let r = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-"), i = await n.showSaveDialog({
+		title: "Export traceroute logs",
+		defaultPath: `traceroute-log-${r}.txt`,
+		filters: [{
+			name: "Text logs",
+			extensions: ["txt"]
+		}, {
+			name: "All files",
+			extensions: ["*"]
+		}]
+	});
+	if (i.canceled || !i.filePath) return { canceled: !0 };
+	try {
+		return {
+			canceled: !1,
+			filePath: await f(d(t, l.TARGET_HOST), i.filePath)
+		};
+	} catch (e) {
+		return {
+			canceled: !1,
+			error: e instanceof Error ? e.message : "Could not save the log file."
+		};
+	}
+});
+var x = () => {
+	_ = new e({
+		width: 600,
+		height: 400,
+		webPreferences: { preload: a.join(p, "preload.mjs") }
+	}), m ? _.loadURL(m) : _.loadFile(a.join(g, "index.html"));
+};
+t.on("window-all-closed", () => {
+	v = !1, process.platform !== "darwin" && (t.quit(), _ = null);
+}), t.on("activate", () => {
+	e.getAllWindows().length === 0 && x();
+}), t.whenReady().then(x);
 //#endregion
-//#region electron/main.ts
-var __dirname = path.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path.join(__dirname, "..");
-var ISP_FAILURE_MOCK = {
-  ispFailureWindows: `
-  Tracing route to 1.1.1.1 over a maximum of 3 hops
-
-    1    <1 ms    <1 ms    <1 ms  192.168.1.1
-    2     *        *        *     Request timed out.
-    3     *        *        *     Request timed out.
-  `,
-  ispFailureUnix: `
-    traceroute to 1.1.1.1 (1.1.1.1), 3 hops max, 52 byte packets
-     1  192.168.1.1  1.120 ms  0.980 ms  0.940 ms
-     2  * * *
-     3  * * *
-  `,
-};
-var VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-var MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
-var RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
-  ? path.join(process.env.APP_ROOT, "public")
-  : RENDERER_DIST;
-var win;
-var isRunning = false;
-var getTracerouteCommand = (host) => {
-  const isWindows = platform() === "win32";
-  const hops = PING_CONFIG.MAX_HOPS;
-  const timeout = PING_CONFIG.TIMEOUT_MS;
-  return isWindows
-    ? `tracert -d -h ${hops} -w ${timeout} ${host}`
-    : `traceroute -n -m ${hops} -w ${Math.ceil(timeout / 1e3)} ${host}`;
-};
-var parseTracerouteOutput = (rawOutput) => {
-  const lines = rawOutput.split("\n").filter((line) => line.trim().length > 0);
-  const hopRegex = /^\s*(\d+)/;
-  const hops = [];
-  lines.forEach((line) => {
-    const match = line.match(hopRegex);
-    if (match) {
-      const hopNumber = parseInt(match[1], 10);
-      const isTimedOut =
-        line.includes("* * *") || (!line.includes("ms") && line.includes("*"));
-      const msMatches = [...line.matchAll(/(\d+(?:\.\d+)?)\s*ms/gi)].map((m) =>
-        parseFloat(m[1]),
-      );
-      const avgHopLatency =
-        msMatches.length > 0
-          ? Math.round(
-              msMatches.reduce((acc, curr) => acc + curr, 0) / msMatches.length,
-            )
-          : 0;
-      hops.push({
-        hopNumber,
-        timedOut: isTimedOut,
-        latency: avgHopLatency,
-      });
-    }
-  });
-  const validLatencies = hops.filter((h) => !h.timedOut && h.latency > 0);
-  const avgLatency =
-    validLatencies.length > 0
-      ? Math.round(
-          validLatencies.reduce((sum, h) => sum + h.latency, 0) /
-            validLatencies.length,
-        )
-      : 0;
-  let status = "stable";
-  let failureOrigin = "none";
-  let message = "Your internet connection is stable!";
-  if (hops.length === 0 || hops[0]?.timedOut) {
-    status = "failed";
-    failureOrigin = "local";
-    message =
-      "Cannot communicate with your local router. Check your Wi-Fi or Ethernet connection.";
-  } else {
-    const firstDrop = hops.find((_, index) =>
-      hops.slice(index).every((remaining) => remaining.timedOut),
-    );
-    if (firstDrop) {
-      status = "failed";
-      failureOrigin = "isp";
-      message = `Signal lost at Hop ${firstDrop.hopNumber}. The issue appears to be with your Internet Service Provider.`;
-    } else if (hops.some((h) => h.timedOut) || avgLatency > 150) {
-      status = "degraded";
-      message =
-        "High latency or minor packet loss detected on your network route.";
-    }
-  }
-  return {
-    status,
-    failureOrigin,
-    message,
-    totalHops: hops.length,
-    avgLatency,
-    rawOutput,
-  };
-};
-var runTracerouteDiagnostic = () => {
-  if (isRunning) return;
-  isRunning = true;
-  exec(
-    getTracerouteCommand(PING_CONFIG.TARGET_HOST),
-    { maxBuffer: 1024 * 500 },
-    (error, stdout, stderr) => {
-      isRunning = false;
-      if (error && !stdout) {
-        if (win)
-          win.webContents.send("ping-update", {
-            status: "failed",
-            failureOrigin: "local",
-            message: "Failed to run diagnostic. Check your network adapter.",
-            totalHops: 0,
-            avgLatency: 0,
-            rawOutput: stderr || error.message,
-          });
-        return;
-      }
-      const results = parseTracerouteOutput(ISP_FAILURE_MOCK.ispFailureUnix);
-      if (win) win.webContents.send("ping-update", results);
-    },
-  );
-};
-ipcMain.on("start-test", () => {
-  runTracerouteDiagnostic();
-});
-ipcMain.on("close-app", () => {
-  app.quit();
-});
-var createWindow = () => {
-  win = new BrowserWindow({
-    width: 600,
-    height: 400,
-    webPreferences: { preload: path.join(__dirname, "preload.mjs") },
-  });
-  if (VITE_DEV_SERVER_URL) win.loadURL(VITE_DEV_SERVER_URL);
-  else win.loadFile(path.join(RENDERER_DIST, "index.html"));
-};
-app.on("window-all-closed", () => {
-  isRunning = false;
-  if (process.platform !== "darwin") {
-    app.quit();
-    win = null;
-  }
-});
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
-app.whenReady().then(createWindow);
-//#endregion
-export { MAIN_DIST, RENDERER_DIST, VITE_DEV_SERVER_URL };
+export { h as MAIN_DIST, g as RENDERER_DIST, m as VITE_DEV_SERVER_URL };
